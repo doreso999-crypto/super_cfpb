@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         CFPB - Remember Uploads + Drag and Drop
 // @namespace    CFPB Tools
-// @version      4.9.0
+// @version      5.0.0
 // @description  Remembers uploaded filenames and supports single-file drag and drop onto the CFPB uploader.
 // @match        https://portal.consumerfinance.gov/*
 // @run-at       document-start
@@ -32,9 +32,24 @@
     function rememberFiles(fileList) {
         const names = Array.from(fileList || []).map(file => file.name).filter(Boolean);
         if (!names.length) return;
-        const merged = [...new Set([...safeGetNames(), ...names])];
+
+        const previous = safeGetNames();
+        const previousLookup = new Set(previous.map(name => name.trim().toLocaleLowerCase()));
+        const duplicates = names.filter(name => previousLookup.has(name.trim().toLocaleLowerCase()));
+        const merged = [...new Set([...previous, ...names])];
+
         try { localStorage.setItem(STORAGE_KEY, JSON.stringify(merged)); } catch (_) {}
-        showToast('Saved uploaded filename(s):\\n' + names.join('\\n'), 'success');
+
+        if (duplicates.length) {
+            showToast(
+                'DUPLICATE FILENAME DETECTED — upload is still allowed.\\n\\n' +
+                duplicates.map(name => '• ' + name).join('\\n') +
+                '\\n\\nThis filename already exists in the upload history. Close this notice when reviewed.',
+                'warning'
+            );
+        } else {
+            showToast('Saved uploaded filename(s):\\n' + names.join('\\n'), 'success');
+        }
     }
 
     function detectedBureaus() {
