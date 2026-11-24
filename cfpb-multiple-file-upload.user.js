@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         CFPB - Multiple File Selection + Name Check
 // @namespace    CFPB Tools
-// @version      3.0.0
+// @version      3.1.0
 // @description  Allows multi-select and warns when selected filenames do not match the logged-in user's first name.
 // @match        https://portal.consumerfinance.gov/*
 // @run-at       document-start
@@ -13,7 +13,6 @@
     'use strict';
 
     const FILE_INPUT = 'input[type="file"]';
-    let warningTimer;
 
     function topDocument() {
         try {
@@ -50,6 +49,7 @@
         if (!doc.body) return;
 
         let toast = doc.getElementById('cfpb-filename-warning');
+
         if (!toast) {
             toast = doc.createElement('div');
             toast.id = 'cfpb-filename-warning';
@@ -58,31 +58,55 @@
                 'top:20px',
                 'right:20px',
                 'z-index:2147483647',
-                'max-width:420px',
-                'padding:14px 18px',
-                'background:#fff4d6',
-                'color:#5c4100',
-                'border:2px solid #d99b00',
-                'border-radius:6px',
-                'box-shadow:0 3px 14px rgba(0,0,0,.2)',
-                'font:14px/1.45 Arial,sans-serif',
-                'white-space:pre-line'
+                'width:max-content',
+                'max-width:min(460px,calc(100vw - 40px))',
+                'box-sizing:border-box',
+                'display:flex',
+                'align-items:flex-start',
+                'gap:14px',
+                'padding:14px 16px',
+                'background:#b42318',
+                'color:#fff',
+                'border:2px solid #7a1711',
+                'border-radius:7px',
+                'box-shadow:0 3px 14px rgba(0,0,0,.28)',
+                'font:14px/1.5 Arial,sans-serif'
             ].join(';');
+
+            const messageElement = doc.createElement('div');
+            messageElement.id = 'cfpb-filename-warning-message';
+            messageElement.style.cssText = 'flex:1;min-width:0;white-space:pre-line;overflow-wrap:anywhere';
+
+            const closeButton = doc.createElement('button');
+            closeButton.type = 'button';
+            closeButton.textContent = '×';
+            closeButton.setAttribute('aria-label', 'Close warning');
+            closeButton.title = 'Close';
+            closeButton.style.cssText = [
+                'flex:none',
+                'border:0',
+                'background:transparent',
+                'color:#fff',
+                'font:bold 24px/20px Arial,sans-serif',
+                'padding:0 2px',
+                'margin:-2px -2px 0 0',
+                'cursor:pointer'
+            ].join(';');
+            closeButton.addEventListener('click', () => toast.remove());
+
+            toast.append(messageElement, closeButton);
             doc.body.appendChild(toast);
         }
 
-        toast.textContent = message;
-        toast.style.display = 'block';
-        clearTimeout(warningTimer);
-        warningTimer = setTimeout(() => {
-            toast.style.display = 'none';
-        }, 9000);
+        const messageElement = toast.querySelector('#cfpb-filename-warning-message');
+        if (messageElement) messageElement.textContent = message;
+        toast.style.display = 'flex';
     }
 
     function checkSelectedFiles(input) {
         const firstName = loggedInFirstName();
         if (!firstName) {
-            showWarning('Could not read the logged-in name. Please verify the selected filenames manually.');
+            showWarning('FILENAME CHECK WARNING\nCould not read the logged-in name. Please verify the selected filenames manually.');
             return;
         }
 
