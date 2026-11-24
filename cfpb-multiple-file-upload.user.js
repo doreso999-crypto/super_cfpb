@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         CFPB - Remember Uploads + Auto Select Credit Bureaus
 // @namespace    CFPB Tools
-// @version      4.0.0
-// @description  Remembers uploaded filenames and selects the matching credit reporting companies on the CFPB company step.
+// @version      4.1.0
+// @description  Remembers uploaded filenames and auto-selects matching credit reporting companies when CFPB Step 4 appears.
 // @match        https://portal.consumerfinance.gov/*
 // @run-at       document-start
 // @grant        none
@@ -121,8 +121,11 @@
     async function chooseCompany(input, company) {
         if (!input || !visible(input)) return false;
         input.focus();
-        input.value = company;
+        const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set;
+        if (setter) setter.call(input, company);
+        else input.value = company;
         input.dispatchEvent(new Event('input', { bubbles: true }));
+        input.dispatchEvent(new KeyboardEvent('keyup', { bubbles: true, key: 'y' }));
         input.dispatchEvent(new Event('change', { bubbles: true }));
 
         // Wait for the CFPB typeahead to render the exact company result.
@@ -242,21 +245,55 @@
         );
     }
 
-    function startCompanyStep() {
-        if (!isCompanyStep()) return;
-        let attempts = 0;
-        const timer = setInterval(() => {
-            attempts++;
-            if (document.querySelector('input.search-box-body') || attempts > 30) {
-                clearInterval(timer);
-                autoSelectBureaus();
-            }
-        }, 250);
+    let selectionRunning = false;
+    let selectionDoneForStep = false;
+
+    async function runCompanyStepWhenReady() {
+        if (!isCompanyStep() || selectionRunning || selectionDoneForStep) return;
+        const input = document.querySelector('h2 + div input.search-box-body, input.search-box-body');
+        if (!input) return;
+
+        const names = safeGetNames();
+        if (!names.length) {
+            showToast('NO REMEMBERED FILENAMES\\nNo uploaded filenames were detected for this complaint. Upload/select the files in Step 3 first, then return to Step 4.', 'warning');
+            selectionDoneForStep = true;
+            return;
+        }
+        if (!detectedBureaus().length) {
+            showToast('NO BUREAU CODE FOUND\\nRemembered filenames do not contain EQU, EXP/EX, or TU. You can still search and select the company manually.', 'warning');
+            selectionDoneForStep = true;
+            return;
+        }
+
+        selectionRunning = true;
+        try {
+            await autoSelectBureaus();
+            selectionDoneForStep = true;
+        } finally {
+            selectionRunning = false;
+        }
+    }
+
+    function watchForCompanyStep() {
+        runCompanyStepWhenReady();
+        const observer = new MutationObserver(() => {
+            runCompanyStepWhenReady();
+        });
+        observer.observe(document.documentElement || document, { childList: true, subtree: true });
+        // CFPB is a single-page app; also re-check after its step navigation events.
+        window.addEventListener('hashchange', () => {
+            selectionDoneForStep = false;
+            runCompanyStepWhenReady();
+        });
+        window.addEventListener('popstate', () => {
+            selectionDoneForStep = false;
+            runCompanyStepWhenReady();
+        });
     }
 
     if (document.readyState === 'loading') {
-        document.addEventListener('DOMContentLoaded', startCompanyStep, { once: true });
+        document.addEventListener('DOMContentLoaded', watchForCompanyStep, { once: true });
     } else {
-        startCompanyStep();
+        watchForCompanyStep();
     }
 })();
