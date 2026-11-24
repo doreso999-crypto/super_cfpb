@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         CFPB - Remember Uploads + Detected Company Dropdown
 // @namespace    CFPB Tools
-// @version      4.5.0
-// @description  Remembers uploaded filenames and shows matching companies in a dropdown selects the matching CFPB native company option only after an explicit click.
+// @version      4.6.0
+// @description  Remembers uploaded filenames and shows matching companies in a dropdown provides a direct CFPB company-option shortcut for confirmed company IDs.
 // @match        https://portal.consumerfinance.gov/*
 // @run-at       document-start
 // @grant        none
@@ -17,6 +17,10 @@
         EQU: 'Equifax information solution, Inc.',
         EXP: 'Experian Information Solutions, Inc.',
         TU: 'TRANSUNION INTERMEDIATE HOLDINGS, INC.'
+    };
+    // Confirmed from the CFPB native option HTML supplied by the user.
+    const BUREAU_IDS = {
+        EQU: '001t0000006kvrmAAA'
     };
     const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 
@@ -144,22 +148,38 @@
                 option.addEventListener('mouseleave', () => { option.style.background = '#fff'; });
                 option.addEventListener('mousedown', event => event.preventDefault());
                 option.addEventListener('click', () => {
-                    // Use CFPB's own rendered company option and its native click handler.
-                    // Do not type into the search box or select anything until this explicit click.
-                    const nativeOption = Array.from(
-                        host.querySelectorAll('.result-items-box-body .list-item[data-item-title]')
-                    ).find(label => label.getAttribute('data-item-title') === item.name);
-
-                    if (!nativeOption) {
-                        showToast(item.name + ' is detected, but CFPB has not rendered its native company option yet. The native option HTML/ID is needed to select it directly.', 'warning');
+                    // Clicking this shortcut invokes the same native option structure
+                    // CFPB uses for a company result. No search text is entered.
+                    const results = host.querySelector('.result-items-box-body');
+                    if (!results) {
+                        showToast('CFPB company selection area was not found. The page structure may have changed.', 'warning');
                         return;
                     }
 
-                    const results = nativeOption.closest('.result-items-box-body');
-                    if (results) results.style.display = 'block';
+                    let nativeOption = Array.from(
+                        results.querySelectorAll('.list-item[data-item-title]')
+                    ).find(label => label.getAttribute('data-item-title') === item.name);
+
+                    if (!nativeOption) {
+                        const companyId = BUREAU_IDS[item.code];
+                        if (!companyId) {
+                            showToast(item.name + ' is detected, but its CFPB company ID has not yet been confirmed.', 'warning');
+                            return;
+                        }
+                        nativeOption = document.createElement('label');
+                        nativeOption.tabIndex = 0;
+                        nativeOption.className = 'list-item';
+                        nativeOption.setAttribute('data-item-value', companyId);
+                        nativeOption.setAttribute('data-item-title', item.name);
+                        nativeOption.textContent = item.name;
+                        nativeOption.dataset.cfpbShortcutOption = '1';
+                        results.appendChild(nativeOption);
+                    }
+
+                    results.style.display = 'block';
                     nativeOption.click();
                     list.style.display = 'none';
-                    showToast(item.name + ' selected through CFPB’s native company option.', 'success');
+                    showToast(item.name + ' sent to CFPB through its native company-option element.', 'success');
                 });
                 list.appendChild(option);
             }
