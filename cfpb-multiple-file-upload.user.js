@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         CFPB - Remember Uploads + Detected Company Dropdown
 // @namespace    CFPB Tools
-// @version      4.3.0
-// @description  Remembers uploaded filenames and shows matching companies in a dropdown without autofill or auto-selection.
+// @version      4.4.0
+// @description  Remembers uploaded filenames and shows matching companies in a dropdown on explicit click, without automatic selection.
 // @match        https://portal.consumerfinance.gov/*
 // @run-at       document-start
 // @grant        none
@@ -143,7 +143,23 @@
                 option.addEventListener('mouseenter', () => { option.style.background = '#f0f4f8'; });
                 option.addEventListener('mouseleave', () => { option.style.background = '#fff'; });
                 option.addEventListener('mousedown', event => event.preventDefault());
-                option.addEventListener('click', () => { list.style.display = 'none'; showToast(item.name + ' detected from uploaded filename. Use the CFPB search to select it.', 'success'); });
+                option.addEventListener('click', () => {
+                    // This only runs after the user explicitly clicks a detected company.
+                    // Put its name into CFPB's native search field and let CFPB render
+                    // its own selectable company result; never select that result for them.
+                    input.focus();
+                    const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set;
+                    if (setter) setter.call(input, item.name);
+                    else input.value = item.name;
+                    input.dispatchEvent(new InputEvent('input', {
+                        bubbles: true,
+                        inputType: 'insertText',
+                        data: item.name
+                    }));
+                    input.dispatchEvent(new Event('change', { bubbles: true }));
+                    list.style.display = 'none';
+                    showToast(item.name + ' added to the CFPB search. Select the matching CFPB result below.', 'success');
+                });
                 list.appendChild(option);
             }
             list.style.display = 'block';
