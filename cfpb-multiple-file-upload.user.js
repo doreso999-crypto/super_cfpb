@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         CFPB - Remember Uploads + Drag and Drop
 // @namespace    CFPB Tools
-// @version      5.0.0
+// @version      5.1.0
 // @description  Remembers uploaded filenames and supports single-file drag and drop onto the CFPB uploader.
 // @match        https://portal.consumerfinance.gov/*
 // @run-at       document-start
@@ -131,7 +131,17 @@
     // portal retains responsibility for validation and upload.
     function installUploaderDrop() {
         const uploader = document.getElementById('file-upload');
-        if (!uploader || uploader.dataset.cfpbDropReady === 'true') return;
+        if (!uploader) return;
+
+        if (!document.getElementById('cfpb-active-note')) {
+            const note = document.createElement('div');
+            note.id = 'cfpb-active-note';
+            note.textContent = 'Super CFPB is active';
+            note.style.cssText = 'margin-top:7px;color:#888;font:11px/1.4 Arial,sans-serif;text-align:center;opacity:.75;pointer-events:none';
+            uploader.insertAdjacentElement('afterend', note);
+        }
+
+        if (uploader.dataset.cfpbDropReady === 'true') return;
         uploader.dataset.cfpbDropReady = 'true';
 
         uploader.addEventListener('dragenter', event => {
