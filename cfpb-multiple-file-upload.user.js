@@ -120,11 +120,12 @@
         });
     }
 
-    async function runQueue(input, files) {
+    async function runQueue(input, files, initialCount) {
         activeQueue = true;
         createPanel(files);
 
-        let knownCount = attachmentCount();
+        // Capture the count before CFPB's original handler can finish the first upload.
+        let knownCount = initialCount;
 
         try {
             // The original change event is already submitting file 1.
@@ -170,6 +171,7 @@
 
         const selected = Array.from(input.files || []);
         if (selected.length <= 1) return;
+        const initialCount = attachmentCount();
 
         // Preserve the selected File objects, but let CFPB's original handler
         // receive only the first file. Remaining files are submitted one by one.
@@ -177,7 +179,7 @@
 
         // Defer queue execution until the current change event has reached
         // CFPB's original input/change handlers.
-        queueMicrotask(() => runQueue(input, selected));
+        queueMicrotask(() => runQueue(input, selected, initialCount));
     }
 
     function scan(root) {
