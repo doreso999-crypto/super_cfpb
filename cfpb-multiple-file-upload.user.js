@@ -175,17 +175,20 @@
             showToast('ALREADY SELECTED\\n' + already.map(x => x.company).join('\\n') +
                 '\\nThis company is already included and will receive the complaint.', 'success');
         }
-        if (!pending.length) {\n            try { localStorage.removeItem(STORAGE_KEY); } catch (_) {}\n            return;\n        }\n
+        if (!pending.length) {
+            try { localStorage.removeItem(STORAGE_KEY); } catch (_) {}
+            return;
+        }
+
         let area = firstCompanyArea();
         if (!area) return;
 
         let first = true;
+        let completed = 0;
         for (const item of pending) {
             let input = companyInputIn(area);
             if (!input) break;
 
-            // The first company uses the primary field. Further companies use the
-            // CFPB "Do you want to complain about another company?" flow.
             if (!first) {
                 const added = await enableAdditionalCompany(area);
                 if (!added) {
@@ -203,7 +206,12 @@
                 break;
             }
             showToast('SELECTED FROM UPLOADED FILENAMES\\n' + item.code + ': ' + item.company, 'success');
+            completed++;
             first = false;
+        }
+
+        if (completed === pending.length) {
+            try { localStorage.removeItem(STORAGE_KEY); } catch (_) {}
         }
     }
 
