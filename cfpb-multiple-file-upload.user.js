@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         CFPB - Remember Uploads + Auto Select Credit Bureaus
 // @namespace    CFPB Tools
-// @version      4.2.0
+// @version      4.2.1
 // @description  Remembers uploaded filenames and auto-selects matching credit reporting companies when CFPB Step 4 appears.
 // @match        https://portal.consumerfinance.gov/*
 // @run-at       document-start
@@ -44,8 +44,11 @@
             const upper = name.toUpperCase();
             // EXP is checked separately so it is not confused with the EX abbreviation.
             if (/(^|[^A-Z0-9])EQU([^A-Z0-9]|$)/.test(upper)) found.add('EQU');
-            if (/(^|[^A-Z0-9])EXP([^A-Z0-9]|$)/.test(upper) ||
-                /(^|[^A-Z0-9])EX([^A-Z0-9]|$)/.test(upper)) found.add('EXP');
+            // Accept bureau codes (EX / EXP) and the full bureau name.
+            // Full-name matching is needed for filenames such as "EXPERIAN.pdf",
+            // where EX/EXP is immediately followed by another letter.
+            if (/(^|[^A-Z0-9])EXP?([^A-Z0-9]|$)/.test(upper) ||
+                upper.includes('EXPERIAN')) found.add('EXP');
             if (/(^|[^A-Z0-9])TU([^A-Z0-9]|$)/.test(upper)) found.add('TU');
         }
         return ['EQU', 'EXP', 'TU'].filter(code => found.has(code));
