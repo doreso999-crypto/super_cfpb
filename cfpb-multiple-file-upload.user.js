@@ -76,6 +76,27 @@
         toast.querySelector('#cfpb-helper-toast-text').textContent = message;
     }
 
+    // Explicitly keep the native picker single-file, including dynamically inserted inputs.
+    function enforceSingleFilePicker(root) {
+        if (!root || typeof root.querySelectorAll !== 'function') return;
+        const inputs = [];
+        if (root instanceof HTMLInputElement && root.type === 'file') inputs.push(root);
+        inputs.push(...root.querySelectorAll('input[type="file"]'));
+        for (const input of inputs) {
+            input.multiple = false;
+            input.removeAttribute('multiple');
+        }
+    }
+
+    enforceSingleFilePicker(document);
+    new MutationObserver(records => {
+        for (const record of records) {
+            for (const node of record.addedNodes) {
+                if (node.nodeType === Node.ELEMENT_NODE) enforceSingleFilePicker(node);
+            }
+        }
+    }).observe(document.documentElement, { childList: true, subtree: true });
+
     // Step 3: capture filenames from the ordinary single-file picker. No multi-select is enabled.
     document.addEventListener('change', event => {
         const input = event.target;
