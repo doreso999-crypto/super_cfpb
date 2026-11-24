@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         CFPB - Remember Uploads + Auto Select Credit Bureaus
 // @namespace    CFPB Tools
-// @version      4.1.0
+// @version      4.2.0
 // @description  Remembers uploaded filenames and auto-selects matching credit reporting companies when CFPB Step 4 appears.
 // @match        https://portal.consumerfinance.gov/*
 // @run-at       document-start
@@ -121,25 +121,35 @@
     async function chooseCompany(input, company) {
         if (!input || !visible(input)) return false;
         input.focus();
+
+        // Use the native input setter, then emit the events Aura's typeahead listens for.
         const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set;
         if (setter) setter.call(input, company);
         else input.value = company;
-        input.dispatchEvent(new Event('input', { bubbles: true }));
-        input.dispatchEvent(new KeyboardEvent('keyup', { bubbles: true, key: 'y' }));
-        input.dispatchEvent(new Event('change', { bubbles: true }));
+        input.dispatchEvent(new Event('input', { bubbles: true, composed: true }));
+        input.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, composed: true, key: company.slice(-1) }));
+        input.dispatchEvent(new KeyboardEvent('keyup', { bubbles: true, composed: true, key: company.slice(-1) }));
+        input.dispatchEvent(new Event('change', { bubbles: true, composed: true }));
 
-        // Wait for the CFPB typeahead to render the exact company result.
-        for (let attempt = 0; attempt < 35; attempt++) {
+        const normalized = value => (value || '').replace(/\\s+/g, ' ').trim().toLowerCase();
+        // CFPB renders results inside .result-items-box-body under this exact typeahead.
+        for (let attempt = 0; attempt < 50; attempt++) {
             await sleep(200);
             const scope = input.closest('.cMosTypeaheadSearch') || input.parentElement;
-            const options = Array.from(scope.querySelectorAll('.list-item,[data-item-title]'));
-            const match = options.find(option => {
+            const resultBox = scope?.querySelector('.result-items-box-body');
+            const searchRoot = resultBox && resultBox.children.length ? resultBox : scope;
+            const candidates = Array.from(searchRoot.querySelectorAll(
+                '[data-item-title],.list-item,[role="option"],li,button,a,div,span'
+            ));
+            const match = candidates.find(option => {
                 const title = option.getAttribute('data-item-title') || option.textContent || '';
-                return title.trim().toLowerCase() === company.toLowerCase() && visible(option);
+                return normalized(title) === normalized(company) && visible(option);
             });
             if (match) {
-                match.click();
-                await sleep(450);
+                // Prefer the nearest clickable/result row rather than a nested text span.
+                const clickable = match.closest('button,[role="option"],.list-item,li,[data-item-title]') || match;
+                clickable.click();
+                await sleep(500);
                 return true;
             }
         }
@@ -147,6 +157,19 @@
     }
 
     function firstCompanyArea() {
+        // CFPB's current Aura markup places the primary search input inside this
+        // component; it is not necessarily preceded by an h2 heading.
+        const component = document.querySelector('.cMosConsumerAllCompanyHCIU');
+        if (component && companyInputIn(component)) return component;
+
+        // Fallback for alternate/older CFPB layouts.
+        const labelled = Array.from(document.querySelectorAll('label'))
+            .find(label => label.textContent.trim().toLowerCase() === 'company name');
+        if (labelled) {
+            const typeahead = labelled.closest('.cMosTypeaheadSearch');
+            if (typeahead && companyInputIn(typeahead)) return typeahead;
+        }
+
         const headings = Array.from(document.querySelectorAll('h2'));
         const heading = headings.find(h => h.textContent.trim().toLowerCase() === 'credit reporting company');
         if (!heading) return null;
@@ -190,7 +213,7 @@
 
     async function autoSelectBureaus() {
         const codes = detectedBureaus();
-        if (!codes.length) return;
+        if (!codes.length) return false;
         const targets = codes.map(code => ({ code, company: BUREAUS[code] }));
         const already = targets.filter(item => selectedCompanyExists(item.company));
         const pending = targets.filter(item => !selectedCompanyExists(item.company));
@@ -201,11 +224,14 @@
         }
         if (!pending.length) {
             try { localStorage.removeItem(STORAGE_KEY); } catch (_) {}
-            return;
+            return true;
         }
 
         let area = firstCompanyArea();
-        if (!area) return;
+        if (!area || !companyInputIn(area)) {
+            showToast('COMPANY SEARCH FIELD NOT FOUND\\nThe CFPB Company name field has not rendered yet. The helper will retry automatically.', 'warning');
+            return false;
+        }
 
         let first = true;
         let completed = 0;
@@ -236,7 +262,9 @@
 
         if (completed === pending.length) {
             try { localStorage.removeItem(STORAGE_KEY); } catch (_) {}
+            return true;
         }
+        return false;
     }
 
     function isCompanyStep() {
@@ -250,8 +278,9 @@
 
     async function runCompanyStepWhenReady() {
         if (!isCompanyStep() || selectionRunning || selectionDoneForStep) return;
-        const input = document.querySelector('h2 + div input.search-box-body, input.search-box-body');
-        if (!input) return;
+        const area = firstCompanyArea();
+        const input = area && companyInputIn(area);
+        if (!input || !visible(input)) return;
 
         const names = safeGetNames();
         if (!names.length) {
@@ -267,8 +296,10 @@
 
         selectionRunning = true;
         try {
-            await autoSelectBureaus();
-            selectionDoneForStep = true;
+            const completed = await autoSelectBureaus();
+            // Keep the observer active after a failed attempt so late Aura rendering
+            // or a temporarily missing result can be retried without manual searching.
+            selectionDoneForStep = completed === true;
         } finally {
             selectionRunning = false;
         }
