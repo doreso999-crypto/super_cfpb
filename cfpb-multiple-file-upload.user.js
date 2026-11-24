@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         CFPB - Remember Uploads + Detected Company Dropdown
 // @namespace    CFPB Tools
-// @version      4.7.0
-// @description  Remembers uploaded filenames and shows matching companies in a dropdown shows matching companies in a dropdown without autofill or automatic selection.
+// @version      4.8.0
+// @description  Remembers uploaded filenames and shows matching companies in a dropdown remembers uploaded filenames; no company dropdown or autofill.
 // @match        https://portal.consumerfinance.gov/*
 // @run-at       document-start
 // @grant        none
@@ -116,47 +116,6 @@
 
     function companyInputIn(container) {
         return container?.querySelector('input.search-box-body, input[placeholder="Company name"]') || null;
-    }
-
-    function addCompanyDropdown(input) {
-        if (!input || input.dataset.cfpbDropdownReady === '1') return;
-        input.dataset.cfpbDropdownReady = '1';
-        const host = input.closest('.cMosTypeaheadSearch') || input.parentElement;
-        if (!host) return;
-        if (!host.style.position) host.style.position = 'relative';
-        const list = document.createElement('div');
-        list.className = 'cfpb-detected-company-dropdown';
-        list.setAttribute('role', 'listbox');
-        list.style.cssText = 'display:none;position:absolute;top:100%;left:0;right:0;z-index:2147483000;max-height:240px;overflow-y:auto;background:#fff;border:1px solid #777;border-radius:4px;box-shadow:0 4px 12px #0002;padding:4px 0;margin-top:2px';
-        const refresh = () => {
-            const codes = detectedBureaus();
-            const query = input.value.trim().toLowerCase();
-            list.replaceChildren();
-            const options = codes.map(code => ({ code, name: BUREAUS[code] })).filter(item => !query || item.name.toLowerCase().includes(query) || item.code.toLowerCase().includes(query));
-            if (!options.length) { list.style.display = 'none'; return; }
-            for (const item of options) {
-                const option = document.createElement('button');
-                option.type = 'button';
-                option.textContent = item.name;
-                option.setAttribute('role', 'option');
-                option.style.cssText = 'display:block;width:100%;padding:9px 12px;border:0;background:#fff;color:#222;text-align:left;font:14px Arial,sans-serif;cursor:pointer';
-                option.addEventListener('mouseenter', () => { option.style.background = '#f0f4f8'; });
-                option.addEventListener('mouseleave', () => { option.style.background = '#fff'; });
-                option.addEventListener('mousedown', event => event.preventDefault());
-                list.appendChild(option);
-            }
-            list.style.display = 'block';
-        };
-        host.appendChild(list);
-        input.addEventListener('focus', refresh);
-        input.addEventListener('input', refresh);
-        input.addEventListener('click', refresh);
-        document.addEventListener('click', event => { if (!host.contains(event.target)) list.style.display = 'none'; });
-    }
-
-    function installDetectedCompanyDropdowns() {
-        const inputs = Array.from(document.querySelectorAll('input.search-box-body, input[placeholder="Company name"]'));
-        for (const input of inputs) if (visible(input)) addCompanyDropdown(input);
     }
 
     function watchForCompanyStep() {
