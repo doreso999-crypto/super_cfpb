@@ -1,8 +1,8 @@
 // ==UserScript==
-// @name         CFPB - Remember Uploads + Detected Company Dropdown
+// @name         CFPB - Remember Uploads + Drag and Drop
 // @namespace    CFPB Tools
-// @version      4.8.0
-// @description  Remembers uploaded filenames and shows matching companies in a dropdown remembers uploaded filenames; no company dropdown or autofill.
+// @version      4.9.0
+// @description  Remembers uploaded filenames and supports single-file drag and drop onto the CFPB uploader.
 // @match        https://portal.consumerfinance.gov/*
 // @run-at       document-start
 // @grant        none
@@ -110,24 +110,54 @@
         }
     }, true);
 
-    function visible(element) {
-        return !!(element && (element.offsetWidth || element.offsetHeight || element.getClientRects().length));
+
+    // Allow a single file to be dropped directly onto CFPB's visible uploader.
+    // Route it through the page's existing file input/change handler so the
+    // portal retains responsibility for validation and upload.
+    function installUploaderDrop() {
+        const uploader = document.getElementById('file-upload');
+        if (!uploader || uploader.dataset.cfpbDropReady === 'true') return;
+        uploader.dataset.cfpbDropReady = 'true';
+
+        uploader.addEventListener('dragenter', event => {
+            event.preventDefault();
+            if (event.dataTransfer) event.dataTransfer.dropEffect = 'copy';
+        }, true);
+
+        uploader.addEventListener('dragover', event => {
+            event.preventDefault();
+            if (event.dataTransfer) event.dataTransfer.dropEffect = 'copy';
+        }, true);
+
+        uploader.addEventListener('drop', event => {
+            event.preventDefault();
+            event.stopImmediatePropagation();
+
+            const file = event.dataTransfer?.files?.[0];
+            if (!file) return;
+
+            const input = uploader.querySelector('input[type="file"]') ||
+                document.querySelector('#j_id0\\:form\\:file');
+            if (!input) {
+                showToast('The CFPB file input was not found. Please use “Select a file to upload.”');
+                return;
+            }
+
+            try {
+                const transfer = new DataTransfer();
+                transfer.items.add(file);
+                input.files = transfer.files;
+                input.dispatchEvent(new Event('change', { bubbles: true }));
+            } catch (error) {
+                showToast('This browser could not pass the dropped file to the CFPB uploader. Please use “Select a file to upload.”');
+            }
+        }, true);
     }
 
-    function companyInputIn(container) {
-        return container?.querySelector('input.search-box-body, input[placeholder="Company name"]') || null;
-    }
+    installUploaderDrop();
+    new MutationObserver(installUploaderDrop).observe(document.documentElement, {
+        childList: true,
+        subtree: true
+    });
 
-    function watchForCompanyStep() {
-        installDetectedCompanyDropdowns();
-        const observer = new MutationObserver(installDetectedCompanyDropdowns);
-        observer.observe(document.documentElement || document, { childList: true, subtree: true });
-        window.addEventListener('hashchange', installDetectedCompanyDropdowns);
-        window.addEventListener('popstate', installDetectedCompanyDropdowns);
-    }
-    if (document.readyState === 'loading') {
-        document.addEventListener('DOMContentLoaded', watchForCompanyStep, { once: true });
-    } else {
-        watchForCompanyStep();
-    }
 })();
