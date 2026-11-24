@@ -1,8 +1,8 @@
 // ==UserScript==
-// @name         CFPB - Remember Uploads + Auto Select Credit Bureaus
+// @name         CFPB - Remember Uploads + Detected Company Dropdown
 // @namespace    CFPB Tools
-// @version      4.2.2
-// @description  Remembers uploaded filenames and auto-selects matching credit reporting companies when CFPB Step 4 appears.
+// @version      4.3.0
+// @description  Remembers uploaded filenames and shows matching companies in a dropdown without autofill or auto-selection.
 // @match        https://portal.consumerfinance.gov/*
 // @run-at       document-start
 // @grant        none
@@ -118,215 +118,55 @@
         return container?.querySelector('input.search-box-body, input[placeholder="Company name"]') || null;
     }
 
-    function selectedCompanyExists(company) {
-        const bodyText = document.body?.innerText || '';
-        return bodyText.toLowerCase().includes(company.toLowerCase());
-    }
-
-    async function chooseCompany(input, company) {
-        if (!input || !visible(input)) return false;
-        input.focus();
-
-        // Use the native input setter, then emit the events Aura's typeahead listens for.
-        const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set;
-        if (setter) setter.call(input, company);
-        else input.value = company;
-        input.dispatchEvent(new Event('input', { bubbles: true, composed: true }));
-        input.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, composed: true, key: company.slice(-1) }));
-        input.dispatchEvent(new KeyboardEvent('keyup', { bubbles: true, composed: true, key: company.slice(-1) }));
-        input.dispatchEvent(new Event('change', { bubbles: true, composed: true }));
-
-        const normalized = value => (value || '').replace(/\\s+/g, ' ').trim().toLowerCase();
-        // CFPB renders results inside .result-items-box-body under this exact typeahead.
-        for (let attempt = 0; attempt < 50; attempt++) {
-            await sleep(200);
-            const scope = input.closest('.cMosTypeaheadSearch') || input.parentElement;
-            const resultBox = scope?.querySelector('.result-items-box-body');
-            const searchRoot = resultBox && resultBox.children.length ? resultBox : scope;
-            const candidates = Array.from(searchRoot.querySelectorAll(
-                '[data-item-title],.list-item,[role="option"],li,button,a,div,span'
-            ));
-            const match = candidates.find(option => {
-                const title = option.getAttribute('data-item-title') || option.textContent || '';
-                return normalized(title) === normalized(company) && visible(option);
-            });
-            if (match) {
-                // Prefer the nearest clickable/result row rather than a nested text span.
-                const clickable = match.closest('button,[role="option"],.list-item,li,[data-item-title]') || match;
-                clickable.click();
-                await sleep(500);
-                return true;
+    function addCompanyDropdown(input) {
+        if (!input || input.dataset.cfpbDropdownReady === '1') return;
+        input.dataset.cfpbDropdownReady = '1';
+        const host = input.closest('.cMosTypeaheadSearch') || input.parentElement;
+        if (!host) return;
+        if (!host.style.position) host.style.position = 'relative';
+        const list = document.createElement('div');
+        list.className = 'cfpb-detected-company-dropdown';
+        list.setAttribute('role', 'listbox');
+        list.style.cssText = 'display:none;position:absolute;top:100%;left:0;right:0;z-index:2147483000;max-height:240px;overflow-y:auto;background:#fff;border:1px solid #777;border-radius:4px;box-shadow:0 4px 12px #0002;padding:4px 0;margin-top:2px';
+        const refresh = () => {
+            const codes = detectedBureaus();
+            const query = input.value.trim().toLowerCase();
+            list.replaceChildren();
+            const options = codes.map(code => ({ code, name: BUREAUS[code] })).filter(item => !query || item.name.toLowerCase().includes(query) || item.code.toLowerCase().includes(query));
+            if (!options.length) { list.style.display = 'none'; return; }
+            for (const item of options) {
+                const option = document.createElement('button');
+                option.type = 'button';
+                option.textContent = item.name;
+                option.setAttribute('role', 'option');
+                option.style.cssText = 'display:block;width:100%;padding:9px 12px;border:0;background:#fff;color:#222;text-align:left;font:14px Arial,sans-serif;cursor:pointer';
+                option.addEventListener('mouseenter', () => { option.style.background = '#f0f4f8'; });
+                option.addEventListener('mouseleave', () => { option.style.background = '#fff'; });
+                option.addEventListener('mousedown', event => event.preventDefault());
+                option.addEventListener('click', () => { list.style.display = 'none'; showToast(item.name + ' detected from uploaded filename. Use the CFPB search to select it.', 'success'); });
+                list.appendChild(option);
             }
-        }
-        return false;
+            list.style.display = 'block';
+        };
+        host.appendChild(list);
+        input.addEventListener('focus', refresh);
+        input.addEventListener('input', refresh);
+        input.addEventListener('click', refresh);
+        document.addEventListener('click', event => { if (!host.contains(event.target)) list.style.display = 'none'; });
     }
 
-    function firstCompanyArea() {
-        // CFPB's current Aura markup places the primary search input inside this
-        // component; it is not necessarily preceded by an h2 heading.
-        const component = document.querySelector('.cMosConsumerAllCompanyHCIU');
-        if (component && companyInputIn(component)) return component;
-
-        // Fallback for alternate/older CFPB layouts.
-        const labelled = Array.from(document.querySelectorAll('label'))
-            .find(label => label.textContent.trim().toLowerCase() === 'company name');
-        if (labelled) {
-            const typeahead = labelled.closest('.cMosTypeaheadSearch');
-            if (typeahead && companyInputIn(typeahead)) return typeahead;
-        }
-
-        const headings = Array.from(document.querySelectorAll('h2'));
-        const heading = headings.find(h => h.textContent.trim().toLowerCase() === 'credit reporting company');
-        if (!heading) return null;
-        let node = heading.nextElementSibling;
-        while (node && !companyInputIn(node)) node = node.nextElementSibling;
-        return node;
-    }
-
-    function nextCompanyQuestion(afterNode) {
-        const sections = Array.from(document.querySelectorAll('section'));
-        const section = sections.find(s => {
-            const text = s.innerText || '';
-            return text.includes('Do you want to complain about another company?') &&
-                (!afterNode || afterNode.compareDocumentPosition(s) & Node.DOCUMENT_POSITION_FOLLOWING);
-        });
-        return section || null;
-    }
-
-    async function enableAdditionalCompany(afterNode) {
-        const question = nextCompanyQuestion(afterNode);
-        if (!question) return false;
-        const yes = Array.from(question.querySelectorAll('input[type="radio"]'))
-            .find(input => input.value.toLowerCase() === 'yes');
-        if (!yes) return false;
-        if (!yes.checked) {
-            yes.click();
-            yes.dispatchEvent(new Event('change', { bubbles: true }));
-        }
-        for (let i = 0; i < 30; i++) {
-            await sleep(200);
-            const headings = Array.from(document.querySelectorAll('h2'));
-            const additional = headings.find(h => h.textContent.trim().toLowerCase() === 'additional company');
-            if (additional) {
-                let node = additional.nextElementSibling;
-                while (node && !companyInputIn(node)) node = node.nextElementSibling;
-                if (node && companyInputIn(node)) return { container: node, question };
-            }
-        }
-        return false;
-    }
-
-    async function autoSelectBureaus() {
-        const codes = detectedBureaus();
-        if (!codes.length) return false;
-        const targets = codes.map(code => ({ code, company: BUREAUS[code] }));
-        const already = targets.filter(item => selectedCompanyExists(item.company));
-        const pending = targets.filter(item => !selectedCompanyExists(item.company));
-
-        if (already.length) {
-            showToast('ALREADY SELECTED\\n' + already.map(x => x.company).join('\\n') +
-                '\\nThis company is already included and will receive the complaint.', 'success');
-        }
-        if (!pending.length) {
-            try { localStorage.removeItem(STORAGE_KEY); } catch (_) {}
-            return true;
-        }
-
-        let area = firstCompanyArea();
-        if (!area || !companyInputIn(area)) {
-            showToast('COMPANY SEARCH FIELD NOT FOUND\\nThe CFPB Company name field has not rendered yet. The helper will retry automatically.', 'warning');
-            return false;
-        }
-
-        let first = true;
-        let completed = 0;
-        for (const item of pending) {
-            let input = companyInputIn(area);
-            if (!input) break;
-
-            if (!first) {
-                const added = await enableAdditionalCompany(area);
-                if (!added) {
-                    showToast('Could not open the next Additional company field. Select Yes manually, then search for: ' + item.company);
-                    break;
-                }
-                area = added.container;
-                input = companyInputIn(area);
-            }
-
-            const selected = await chooseCompany(input, item.company);
-            if (!selected) {
-                showToast('Could not find this exact company in the CFPB search results:\\n' + item.company +
-                    '\\nYou can still search for and select the company manually.');
-                break;
-            }
-            showToast('SELECTED FROM UPLOADED FILENAMES\\n' + item.code + ': ' + item.company, 'success');
-            completed++;
-            first = false;
-        }
-
-        if (completed === pending.length) {
-            try { localStorage.removeItem(STORAGE_KEY); } catch (_) {}
-            return true;
-        }
-        return false;
-    }
-
-    function isCompanyStep() {
-        return Array.from(document.querySelectorAll('h1')).some(h =>
-            h.textContent.toLowerCase().includes('what company is this complaint about')
-        );
-    }
-
-    let selectionRunning = false;
-    let selectionDoneForStep = false;
-
-    async function runCompanyStepWhenReady() {
-        if (!isCompanyStep() || selectionRunning || selectionDoneForStep) return;
-        const area = firstCompanyArea();
-        const input = area && companyInputIn(area);
-        if (!input || !visible(input)) return;
-
-        const names = safeGetNames();
-        if (!names.length) {
-            showToast('NO REMEMBERED FILENAMES\\nNo uploaded filenames were detected for this complaint. Upload/select the files in Step 3 first, then return to Step 4.', 'warning');
-            selectionDoneForStep = true;
-            return;
-        }
-        if (!detectedBureaus().length) {
-            showToast('NO BUREAU CODE FOUND\\nRemembered filenames do not contain EQU, EXP/EX, or TU. You can still search and select the company manually.', 'warning');
-            selectionDoneForStep = true;
-            return;
-        }
-
-        selectionRunning = true;
-        try {
-            const completed = await autoSelectBureaus();
-            // Keep the observer active after a failed attempt so late Aura rendering
-            // or a temporarily missing result can be retried without manual searching.
-            selectionDoneForStep = completed === true;
-        } finally {
-            selectionRunning = false;
-        }
+    function installDetectedCompanyDropdowns() {
+        const inputs = Array.from(document.querySelectorAll('input.search-box-body, input[placeholder="Company name"]'));
+        for (const input of inputs) if (visible(input)) addCompanyDropdown(input);
     }
 
     function watchForCompanyStep() {
-        runCompanyStepWhenReady();
-        const observer = new MutationObserver(() => {
-            runCompanyStepWhenReady();
-        });
+        installDetectedCompanyDropdowns();
+        const observer = new MutationObserver(installDetectedCompanyDropdowns);
         observer.observe(document.documentElement || document, { childList: true, subtree: true });
-        // CFPB is a single-page app; also re-check after its step navigation events.
-        window.addEventListener('hashchange', () => {
-            selectionDoneForStep = false;
-            runCompanyStepWhenReady();
-        });
-        window.addEventListener('popstate', () => {
-            selectionDoneForStep = false;
-            runCompanyStepWhenReady();
-        });
+        window.addEventListener('hashchange', installDetectedCompanyDropdowns);
+        window.addEventListener('popstate', installDetectedCompanyDropdowns);
     }
-
     if (document.readyState === 'loading') {
         document.addEventListener('DOMContentLoaded', watchForCompanyStep, { once: true });
     } else {
