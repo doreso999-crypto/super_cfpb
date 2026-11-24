@@ -175,8 +175,7 @@
             showToast('ALREADY SELECTED\\n' + already.map(x => x.company).join('\\n') +
                 '\\nThis company is already included and will receive the complaint.', 'success');
         }
-        if (!pending.length) return;
-
+        if (!pending.length) {\n            try { localStorage.removeItem(STORAGE_KEY); } catch (_) {}\n            return;\n        }\n
         let area = firstCompanyArea();
         if (!area) return;
 
