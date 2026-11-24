@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         CFPB - Remember Uploads + Detected Company Dropdown
 // @namespace    CFPB Tools
-// @version      4.4.0
-// @description  Remembers uploaded filenames and shows matching companies in a dropdown on explicit click, without automatic selection.
+// @version      4.5.0
+// @description  Remembers uploaded filenames and shows matching companies in a dropdown selects the matching CFPB native company option only after an explicit click.
 // @match        https://portal.consumerfinance.gov/*
 // @run-at       document-start
 // @grant        none
@@ -144,21 +144,22 @@
                 option.addEventListener('mouseleave', () => { option.style.background = '#fff'; });
                 option.addEventListener('mousedown', event => event.preventDefault());
                 option.addEventListener('click', () => {
-                    // This only runs after the user explicitly clicks a detected company.
-                    // Put its name into CFPB's native search field and let CFPB render
-                    // its own selectable company result; never select that result for them.
-                    input.focus();
-                    const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set;
-                    if (setter) setter.call(input, item.name);
-                    else input.value = item.name;
-                    input.dispatchEvent(new InputEvent('input', {
-                        bubbles: true,
-                        inputType: 'insertText',
-                        data: item.name
-                    }));
-                    input.dispatchEvent(new Event('change', { bubbles: true }));
+                    // Use CFPB's own rendered company option and its native click handler.
+                    // Do not type into the search box or select anything until this explicit click.
+                    const nativeOption = Array.from(
+                        host.querySelectorAll('.result-items-box-body .list-item[data-item-title]')
+                    ).find(label => label.getAttribute('data-item-title') === item.name);
+
+                    if (!nativeOption) {
+                        showToast(item.name + ' is detected, but CFPB has not rendered its native company option yet. The native option HTML/ID is needed to select it directly.', 'warning');
+                        return;
+                    }
+
+                    const results = nativeOption.closest('.result-items-box-body');
+                    if (results) results.style.display = 'block';
+                    nativeOption.click();
                     list.style.display = 'none';
-                    showToast(item.name + ' added to the CFPB search. Select the matching CFPB result below.', 'success');
+                    showToast(item.name + ' selected through CFPB’s native company option.', 'success');
                 });
                 list.appendChild(option);
             }
