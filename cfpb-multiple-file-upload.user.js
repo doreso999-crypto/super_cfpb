@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         CFPB - Remember Uploads + Drag and Drop
 // @namespace    CFPB Tools
-// @version      5.4.0
+// @version      5.4.1
 // @description  Remembers uploaded filenames and supports single-file drag and drop onto the CFPB uploader.
 // @match        https://portal.consumerfinance.gov/*
 // @run-at       document-start
@@ -81,24 +81,26 @@
             const saved = JSON.parse(sessionStorage.getItem('cfpb-step3-filenames-v1') || '[]');
             filenames = Array.isArray(saved) ? saved.filter(name => typeof name === 'string' && name.trim()) : [];
         } catch (_) {}
-        panel.replaceChildren();
 
+        // Avoid touching the DOM unless the displayed text actually changes.
+        // The portal observer watches page mutations, including this panel.
+        const displayText = filenames.length
+            ? filenames.join(' | ')
+            : 'No Step 3 filename captured yet.';
+        const currentText = panel.querySelector('[data-cfpb-filename-display]')?.textContent || '';
+        if (currentText === displayText) return;
+
+        panel.replaceChildren();
         const heading = document.createElement('div');
         heading.textContent = 'Filename(s) selected in Step 3';
         heading.style.cssText = 'font-weight:600;margin-bottom:5px';
         panel.appendChild(heading);
 
-        if (!filenames.length) {
-            const note = document.createElement('div');
-            note.textContent = 'No Step 3 filename captured yet.';
-            note.style.color = '#777';
-            panel.appendChild(note);
-            return;
-        }
-
         const list = document.createElement('div');
+        list.dataset.cfpbFilenameDisplay = 'true';
         list.style.cssText = 'overflow-wrap:anywhere';
-        list.textContent = filenames.join(' | ');
+        list.textContent = displayText;
+        if (!filenames.length) list.style.color = '#777';
         panel.appendChild(list);
     }
 
