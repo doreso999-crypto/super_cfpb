@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         CFPB - Remember Uploads + Drag and Drop
 // @namespace    CFPB Tools
-// @version      5.1.0
+// @version      5.2.0
 // @description  Remembers uploaded filenames and supports single-file drag and drop onto the CFPB uploader.
 // @match        https://portal.consumerfinance.gov/*
 // @run-at       document-start
@@ -13,6 +13,8 @@
     'use strict';
 
     const STORAGE_KEY = 'cfpb-uploaded-filenames-v1';
+    const COMPLAINT_FILES_KEY = 'cfpb-files-by-complaint-v1';
+    const ACTIVE_COMPLAINT_KEY = 'cfpb-active-complaint-v1';
     const BUREAUS = {
         EQU: 'Equifax information solution, Inc.',
         EXP: 'Experian Information Solutions, Inc.',
@@ -29,6 +31,89 @@
         }
     }
 
+    function getComplaintId() {
+        const field = document.querySelector(
+            'input[name$="objectRecordId"], input[id$="objectRecordId"], input[name="objectRecordId"]'
+        );
+        const value = field?.value?.trim();
+        if (value) {
+            try { sessionStorage.setItem(ACTIVE_COMPLAINT_KEY, value); } catch (_) {}
+            return value;
+        }
+        try { return sessionStorage.getItem(ACTIVE_COMPLAINT_KEY) || ''; } catch (_) { return ''; }
+    }
+
+    function readComplaintFiles() {
+        try {
+            const value = JSON.parse(localStorage.getItem(COMPLAINT_FILES_KEY) || '{}');
+            return value && typeof value === 'object' && !Array.isArray(value) ? value : {};
+        } catch (_) { return {}; }
+    }
+
+    function fileDestination(filename) {
+        const upper = String(filename).toUpperCase();
+        const tokens = upper.split(/[^A-Z0-9]+/).filter(Boolean);
+        const matches = [];
+        if (tokens.includes('EQU') || upper.includes('EQUIFAX')) matches.push('Equifax');
+        if (tokens.includes('EX') || tokens.includes('EXP') || upper.includes('EXPERIAN')) matches.push('Experian');
+        if (tokens.includes('TU') || upper.includes('TRANSUNION')) matches.push('TransUnion');
+        return matches.length ? matches.join(' / ') : 'Company not identified from filename';
+    }
+
+    function renderStep4Files() {
+        const companyInput = document.querySelector('input.search-box-body, input[placeholder="Company name"]');
+        if (!companyInput) return;
+
+        let panel = document.getElementById('cfpb-step4-uploaded-files');
+        if (!panel) {
+            panel = document.createElement('section');
+            panel.id = 'cfpb-step4-uploaded-files';
+            panel.style.cssText = 'margin:10px 0 14px;padding:10px 12px;border:1px solid #d8d8d8;border-radius:5px;background:#fafafa;color:#333;font:12px/1.5 Arial,sans-serif;max-width:100%;box-sizing:border-box';
+            companyInput.insertAdjacentElement('afterend', panel);
+        }
+
+        const complaintId = getComplaintId();
+        const all = readComplaintFiles();
+        const files = complaintId && Array.isArray(all[complaintId]) ? all[complaintId] : [];
+        panel.replaceChildren();
+
+        const heading = document.createElement('div');
+        heading.textContent = 'Files uploaded for this complaint';
+        heading.style.cssText = 'font-weight:600;margin-bottom:5px';
+        panel.appendChild(heading);
+
+        if (!complaintId) {
+            const note = document.createElement('div');
+            note.textContent = 'Complaint reference unavailable; uploaded files cannot be matched safely.';
+            note.style.color = '#777';
+            panel.appendChild(note);
+            return;
+        }
+
+        if (!files.length) {
+            const note = document.createElement('div');
+            note.textContent = 'No files recorded for this complaint yet.';
+            note.style.color = '#777';
+            panel.appendChild(note);
+            return;
+        }
+
+        const list = document.createElement('ul');
+        list.style.cssText = 'margin:0;padding-left:18px';
+        for (const item of files) {
+            const li = document.createElement('li');
+            li.style.cssText = 'margin:2px 0;overflow-wrap:anywhere';
+            const filename = document.createElement('span');
+            filename.textContent = item.name;
+            const destination = document.createElement('span');
+            destination.textContent = ' — ' + fileDestination(item.name);
+            destination.style.color = '#666';
+            li.append(filename, destination);
+            list.appendChild(li);
+        }
+        panel.appendChild(list);
+    }
+
     function rememberFiles(fileList) {
         const names = Array.from(fileList || []).map(file => file.name).filter(Boolean);
         if (!names.length) return;
@@ -37,8 +122,21 @@
         const previousLookup = new Set(previous.map(name => name.trim().toLocaleLowerCase()));
         const duplicates = names.filter(name => previousLookup.has(name.trim().toLocaleLowerCase()));
         const merged = [...new Set([...previous, ...names])];
-
         try { localStorage.setItem(STORAGE_KEY, JSON.stringify(merged)); } catch (_) {}
+
+        const complaintId = getComplaintId();
+        if (complaintId) {
+            const byComplaint = readComplaintFiles();
+            const current = Array.isArray(byComplaint[complaintId]) ? byComplaint[complaintId] : [];
+            const known = new Set(current.map(item => String(item.name || '').trim().toLocaleLowerCase()));
+            for (const name of names) {
+                if (!known.has(name.trim().toLocaleLowerCase())) current.push({ name, addedAt: Date.now() });
+            }
+            byComplaint[complaintId] = current;
+            try { localStorage.setItem(COMPLAINT_FILES_KEY, JSON.stringify(byComplaint)); } catch (_) {}
+        } else {
+            showToast('Could not identify this complaint. The filename was added to general history but not assigned to a complaint.', 'warning');
+        }
 
         if (duplicates.length) {
             showToast(
@@ -50,6 +148,7 @@
         } else {
             showToast('Saved uploaded filename(s):\\n' + names.join('\\n'), 'success');
         }
+        renderStep4Files();
     }
 
     function detectedBureaus() {
@@ -125,6 +224,16 @@
         }
     }, true);
 
+
+    // Keep the Step 4 file summary current as the portal advances or re-renders.
+    function installStep4FilePanel() {
+        renderStep4Files();
+    }
+    installStep4FilePanel();
+    new MutationObserver(installStep4FilePanel).observe(document.documentElement, {
+        childList: true,
+        subtree: true
+    });
 
     // Allow a single file to be dropped directly onto CFPB's visible uploader.
     // Route it through the page's existing file input/change handler so the
