@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         CFPB - Remember Uploads + Drag and Drop
 // @namespace    CFPB Tools
-// @version      5.2.0
+// @version      5.3.0
 // @description  Remembers uploaded filenames and supports single-file drag and drop onto the CFPB uploader.
 // @match        https://portal.consumerfinance.gov/*
 // @run-at       document-start
@@ -61,15 +61,19 @@
     }
 
     function renderStep4Files() {
+        const sidebar = document.querySelector('aside.content_sidebar.cMosConsumerAside');
         const companyInput = document.querySelector('input.search-box-body, input[placeholder="Company name"]');
-        if (!companyInput) return;
+        const anchor = sidebar || companyInput;
+        if (!anchor) return;
 
         let panel = document.getElementById('cfpb-step4-uploaded-files');
         if (!panel) {
             panel = document.createElement('section');
             panel.id = 'cfpb-step4-uploaded-files';
             panel.style.cssText = 'margin:10px 0 14px;padding:10px 12px;border:1px solid #d8d8d8;border-radius:5px;background:#fafafa;color:#333;font:12px/1.5 Arial,sans-serif;max-width:100%;box-sizing:border-box';
-            companyInput.insertAdjacentElement('afterend', panel);
+            anchor.insertAdjacentElement('afterend', panel);
+        } else if (sidebar && panel.previousElementSibling !== sidebar) {
+            sidebar.insertAdjacentElement('afterend', panel);
         }
 
         const complaintId = getComplaintId();
