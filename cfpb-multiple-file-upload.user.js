@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         CFPB - Remember Uploads + Drag and Drop
 // @namespace    CFPB Tools
-// @version      5.3.0
+// @version      5.4.0
 // @description  Remembers uploaded filenames and supports single-file drag and drop onto the CFPB uploader.
 // @match        https://portal.consumerfinance.gov/*
 // @run-at       document-start
@@ -76,51 +76,43 @@
             sidebar.insertAdjacentElement('afterend', panel);
         }
 
-        const complaintId = getComplaintId();
-        const all = readComplaintFiles();
-        const files = complaintId && Array.isArray(all[complaintId]) ? all[complaintId] : [];
+        let filenames = [];
+        try {
+            const saved = JSON.parse(sessionStorage.getItem('cfpb-step3-filenames-v1') || '[]');
+            filenames = Array.isArray(saved) ? saved.filter(name => typeof name === 'string' && name.trim()) : [];
+        } catch (_) {}
         panel.replaceChildren();
 
         const heading = document.createElement('div');
-        heading.textContent = 'Files uploaded for this complaint';
+        heading.textContent = 'Filename(s) selected in Step 3';
         heading.style.cssText = 'font-weight:600;margin-bottom:5px';
         panel.appendChild(heading);
 
-        if (!complaintId) {
+        if (!filenames.length) {
             const note = document.createElement('div');
-            note.textContent = 'Complaint reference unavailable; uploaded files cannot be matched safely.';
+            note.textContent = 'No Step 3 filename captured yet.';
             note.style.color = '#777';
             panel.appendChild(note);
             return;
         }
 
-        if (!files.length) {
-            const note = document.createElement('div');
-            note.textContent = 'No files recorded for this complaint yet.';
-            note.style.color = '#777';
-            panel.appendChild(note);
-            return;
-        }
-
-        const list = document.createElement('ul');
-        list.style.cssText = 'margin:0;padding-left:18px';
-        for (const item of files) {
-            const li = document.createElement('li');
-            li.style.cssText = 'margin:2px 0;overflow-wrap:anywhere';
-            const filename = document.createElement('span');
-            filename.textContent = item.name;
-            const destination = document.createElement('span');
-            destination.textContent = ' — ' + fileDestination(item.name);
-            destination.style.color = '#666';
-            li.append(filename, destination);
-            list.appendChild(li);
-        }
+        const list = document.createElement('div');
+        list.style.cssText = 'overflow-wrap:anywhere';
+        list.textContent = filenames.join(' | ');
         panel.appendChild(list);
     }
 
     function rememberFiles(fileList) {
         const names = Array.from(fileList || []).map(file => file.name).filter(Boolean);
         if (!names.length) return;
+        // Store only filename strings so Step 4 can display them; file contents are never copied.
+        try {
+            const prior = JSON.parse(sessionStorage.getItem('cfpb-step3-filenames-v1') || '[]');
+            const combined = [...new Set([...(Array.isArray(prior) ? prior : []), ...names])];
+            sessionStorage.setItem('cfpb-step3-filenames-v1', JSON.stringify(combined));
+        } catch (_) {
+            try { sessionStorage.setItem('cfpb-step3-filenames-v1', JSON.stringify(names)); } catch (_) {}
+        }
 
         const previous = safeGetNames();
         const previousLookup = new Set(previous.map(name => name.trim().toLocaleLowerCase()));
