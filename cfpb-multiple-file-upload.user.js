@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         CFPB - Remember Uploads + Drag and Drop
 // @namespace    CFPB Tools
-// @version      5.4.1
+// @version      5.5.0
 // @description  Remembers uploaded filenames and supports single-file drag and drop onto the CFPB uploader.
 // @match        https://portal.consumerfinance.gov/*
 // @run-at       document-start
@@ -60,62 +60,9 @@
         return matches.length ? matches.join(' / ') : 'Company not identified from filename';
     }
 
-    function renderStep4Files() {
-        const sidebar = document.querySelector('aside.content_sidebar.cMosConsumerAside');
-        const companyInput = document.querySelector('input.search-box-body, input[placeholder="Company name"]');
-        const anchor = sidebar || companyInput;
-        if (!anchor) return;
-
-        let panel = document.getElementById('cfpb-step4-uploaded-files');
-        if (!panel) {
-            panel = document.createElement('section');
-            panel.id = 'cfpb-step4-uploaded-files';
-            panel.style.cssText = 'margin:10px 0 14px;padding:10px 12px;border:1px solid #d8d8d8;border-radius:5px;background:#fafafa;color:#333;font:12px/1.5 Arial,sans-serif;max-width:100%;box-sizing:border-box';
-            anchor.insertAdjacentElement('afterend', panel);
-        } else if (sidebar && panel.previousElementSibling !== sidebar) {
-            sidebar.insertAdjacentElement('afterend', panel);
-        }
-
-        let filenames = [];
-        try {
-            const saved = JSON.parse(sessionStorage.getItem('cfpb-step3-filenames-v1') || '[]');
-            filenames = Array.isArray(saved) ? saved.filter(name => typeof name === 'string' && name.trim()) : [];
-        } catch (_) {}
-
-        // Avoid touching the DOM unless the displayed text actually changes.
-        // The portal observer watches page mutations, including this panel.
-        const displayText = filenames.length
-            ? filenames.join(' | ')
-            : 'No Step 3 filename captured yet.';
-        const currentText = panel.querySelector('[data-cfpb-filename-display]')?.textContent || '';
-        if (currentText === displayText) return;
-
-        panel.replaceChildren();
-        const heading = document.createElement('div');
-        heading.textContent = 'Filename(s) selected in Step 3';
-        heading.style.cssText = 'font-weight:600;margin-bottom:5px';
-        panel.appendChild(heading);
-
-        const list = document.createElement('div');
-        list.dataset.cfpbFilenameDisplay = 'true';
-        list.style.cssText = 'overflow-wrap:anywhere';
-        list.textContent = displayText;
-        if (!filenames.length) list.style.color = '#777';
-        panel.appendChild(list);
-    }
-
     function rememberFiles(fileList) {
         const names = Array.from(fileList || []).map(file => file.name).filter(Boolean);
         if (!names.length) return;
-        // Store only filename strings so Step 4 can display them; file contents are never copied.
-        try {
-            const prior = JSON.parse(sessionStorage.getItem('cfpb-step3-filenames-v1') || '[]');
-            const combined = [...new Set([...(Array.isArray(prior) ? prior : []), ...names])];
-            sessionStorage.setItem('cfpb-step3-filenames-v1', JSON.stringify(combined));
-        } catch (_) {
-            try { sessionStorage.setItem('cfpb-step3-filenames-v1', JSON.stringify(names)); } catch (_) {}
-        }
-
         const previous = safeGetNames();
         const previousLookup = new Set(previous.map(name => name.trim().toLocaleLowerCase()));
         const duplicates = names.filter(name => previousLookup.has(name.trim().toLocaleLowerCase()));
@@ -222,16 +169,6 @@
         }
     }, true);
 
-
-    // Keep the Step 4 file summary current as the portal advances or re-renders.
-    function installStep4FilePanel() {
-        renderStep4Files();
-    }
-    installStep4FilePanel();
-    new MutationObserver(installStep4FilePanel).observe(document.documentElement, {
-        childList: true,
-        subtree: true
-    });
 
     // Allow a single file to be dropped directly onto CFPB's visible uploader.
     // Route it through the page's existing file input/change handler so the
