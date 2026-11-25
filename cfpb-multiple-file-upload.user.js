@@ -1,26 +1,22 @@
 // ==UserScript==
 // @name         CFPB - Remember Uploads + Drag and Drop
 // @namespace    CFPB Tools
-// @version      5.5.0
+// @version      5.6.0
 // @description  Remembers uploaded filenames and supports single-file drag and drop onto the CFPB uploader.
 // @match        https://portal.consumerfinance.gov/*
 // @run-at       document-start
 // @grant        none
-// @all-frames   true
 // ==/UserScript==
 
 (function () {
     'use strict';
 
     const STORAGE_KEY = 'cfpb-uploaded-filenames-v1';
-    const COMPLAINT_FILES_KEY = 'cfpb-files-by-complaint-v1';
-    const ACTIVE_COMPLAINT_KEY = 'cfpb-active-complaint-v1';
     const BUREAUS = {
         EQU: 'Equifax information solution, Inc.',
         EXP: 'Experian Information Solutions, Inc.',
         TU: 'TRANSUNION INTERMEDIATE HOLDINGS, INC.'
     };
-    const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 
     function safeGetNames() {
         try {
@@ -29,35 +25,6 @@
         } catch (_) {
             return [];
         }
-    }
-
-    function getComplaintId() {
-        const field = document.querySelector(
-            'input[name$="objectRecordId"], input[id$="objectRecordId"], input[name="objectRecordId"]'
-        );
-        const value = field?.value?.trim();
-        if (value) {
-            try { sessionStorage.setItem(ACTIVE_COMPLAINT_KEY, value); } catch (_) {}
-            return value;
-        }
-        try { return sessionStorage.getItem(ACTIVE_COMPLAINT_KEY) || ''; } catch (_) { return ''; }
-    }
-
-    function readComplaintFiles() {
-        try {
-            const value = JSON.parse(localStorage.getItem(COMPLAINT_FILES_KEY) || '{}');
-            return value && typeof value === 'object' && !Array.isArray(value) ? value : {};
-        } catch (_) { return {}; }
-    }
-
-    function fileDestination(filename) {
-        const upper = String(filename).toUpperCase();
-        const tokens = upper.split(/[^A-Z0-9]+/).filter(Boolean);
-        const matches = [];
-        if (tokens.includes('EQU') || upper.includes('EQUIFAX')) matches.push('Equifax');
-        if (tokens.includes('EX') || tokens.includes('EXP') || upper.includes('EXPERIAN')) matches.push('Experian');
-        if (tokens.includes('TU') || upper.includes('TRANSUNION')) matches.push('TransUnion');
-        return matches.length ? matches.join(' / ') : 'Company not identified from filename';
     }
 
     function rememberFiles(fileList) {
@@ -69,20 +36,6 @@
         const merged = [...new Set([...previous, ...names])];
         try { localStorage.setItem(STORAGE_KEY, JSON.stringify(merged)); } catch (_) {}
 
-        const complaintId = getComplaintId();
-        if (complaintId) {
-            const byComplaint = readComplaintFiles();
-            const current = Array.isArray(byComplaint[complaintId]) ? byComplaint[complaintId] : [];
-            const known = new Set(current.map(item => String(item.name || '').trim().toLocaleLowerCase()));
-            for (const name of names) {
-                if (!known.has(name.trim().toLocaleLowerCase())) current.push({ name, addedAt: Date.now() });
-            }
-            byComplaint[complaintId] = current;
-            try { localStorage.setItem(COMPLAINT_FILES_KEY, JSON.stringify(byComplaint)); } catch (_) {}
-        } else {
-            showToast('Could not identify this complaint. The filename was added to general history but not assigned to a complaint.', 'warning');
-        }
-
         if (duplicates.length) {
             showToast(
                 'DUPLICATE FILENAME DETECTED — upload is still allowed.\\n\\n' +
@@ -93,26 +46,6 @@
         } else {
             showToast('Saved uploaded filename(s):\\n' + names.join('\\n'), 'success');
         }
-        renderStep4Files();
-    }
-
-    function detectedBureaus() {
-        const names = safeGetNames();
-        const found = new Set();
-
-        for (const name of names) {
-            // Split on every non-alphanumeric character so codes surrounded by
-            // hyphens, underscores, spaces, or punctuation are treated equally.
-            // Example: "Daniel H-EXP-LP" becomes ["DANIEL", "H", "EXP", "LP"].
-            const upper = String(name).toUpperCase();
-            const tokens = upper.split(/[^A-Z0-9]+/).filter(Boolean);
-
-            if (tokens.includes('EQU') || upper.includes('EQUIFAX')) found.add('EQU');
-            if (tokens.includes('EX') || tokens.includes('EXP') || upper.includes('EXPERIAN')) found.add('EXP');
-            if (tokens.includes('TU') || upper.includes('TRANSUNION')) found.add('TU');
-        }
-
-        return ['EQU', 'EXP', 'TU'].filter(code => found.has(code));
     }
 
     function showToast(message, type = 'warning') {
@@ -140,42 +73,24 @@
         toast.querySelector('#cfpb-helper-toast-text').textContent = message;
     }
 
-    // Explicitly keep the native picker single-file, including dynamically inserted inputs.
+    // Keep the native picker single-file. Avoid repeatedly scanning the whole page:
+    // process only newly inserted elements that actually contain file inputs.
     function enforceSingleFilePicker(root) {
-        if (!root || typeof root.querySelectorAll !== 'function') return;
-        const inputs = [];
-        if (root instanceof HTMLInputElement && root.type === 'file') inputs.push(root);
-        inputs.push(...root.querySelectorAll('input[type="file"]'));
-        for (const input of inputs) {
-            input.multiple = false;
-            input.removeAttribute('multiple');
+        if (!root || root.nodeType !== Node.ELEMENT_NODE) return;
+        if (root.matches?.('input[type="file"]')) {
+            root.multiple = false;
+            root.removeAttribute('multiple');
+        }
+        if (root.querySelectorAll) {
+            for (const input of root.querySelectorAll('input[type="file"]')) {
+                input.multiple = false;
+                input.removeAttribute('multiple');
+            }
         }
     }
 
-    enforceSingleFilePicker(document);
-    new MutationObserver(records => {
-        for (const record of records) {
-            for (const node of record.addedNodes) {
-                if (node.nodeType === Node.ELEMENT_NODE) enforceSingleFilePicker(node);
-            }
-        }
-    }).observe(document.documentElement, { childList: true, subtree: true });
-
-    // Step 3: capture filenames from the ordinary single-file picker. No multi-select is enabled.
-    document.addEventListener('change', event => {
-        const input = event.target;
-        if (input instanceof HTMLInputElement && input.type === 'file') {
-            rememberFiles(input.files);
-        }
-    }, true);
-
-
-    // Allow a single file to be dropped directly onto CFPB's visible uploader.
-    // Route it through the page's existing file input/change handler so the
-    // portal retains responsibility for validation and upload.
-    function installUploaderDrop() {
-        const uploader = document.getElementById('file-upload');
-        if (!uploader) return;
+    function installUploaderDrop(uploader) {
+        if (!uploader || uploader.dataset.cfpbDropReady === 'true') return;
 
         if (!document.getElementById('cfpb-active-note')) {
             const note = document.createElement('div');
@@ -185,19 +100,15 @@
             uploader.insertAdjacentElement('afterend', note);
         }
 
-        if (uploader.dataset.cfpbDropReady === 'true') return;
         uploader.dataset.cfpbDropReady = 'true';
-
         uploader.addEventListener('dragenter', event => {
             event.preventDefault();
             if (event.dataTransfer) event.dataTransfer.dropEffect = 'copy';
         }, true);
-
         uploader.addEventListener('dragover', event => {
             event.preventDefault();
             if (event.dataTransfer) event.dataTransfer.dropEffect = 'copy';
         }, true);
-
         uploader.addEventListener('drop', event => {
             event.preventDefault();
             event.stopImmediatePropagation();
@@ -217,16 +128,45 @@
                 transfer.items.add(file);
                 input.files = transfer.files;
                 input.dispatchEvent(new Event('change', { bubbles: true }));
-            } catch (error) {
+            } catch (_) {
                 showToast('This browser could not pass the dropped file to the CFPB uploader. Please use “Select a file to upload.”');
             }
         }, true);
     }
 
-    installUploaderDrop();
-    new MutationObserver(installUploaderDrop).observe(document.documentElement, {
-        childList: true,
-        subtree: true
+    function processAddedNode(node) {
+        if (!node || node.nodeType !== Node.ELEMENT_NODE) return;
+        enforceSingleFilePicker(node);
+
+        let uploader = null;
+        if (node.matches?.('#file-upload')) uploader = node;
+        else uploader = node.querySelector?.('#file-upload');
+        if (uploader) installUploaderDrop(uploader);
+    }
+
+    // Initial pass, then one observer that reacts only to inserted subtrees.
+    enforceSingleFilePicker(document.documentElement);
+    const initialUploader = document.getElementById('file-upload');
+    if (initialUploader) installUploaderDrop(initialUploader);
+
+    const pageObserver = new MutationObserver(records => {
+        for (const record of records) {
+            for (const node of record.addedNodes) processAddedNode(node);
+        }
     });
+    if (document.documentElement) {
+        pageObserver.observe(document.documentElement, { childList: true, subtree: true });
+    }
+
+    // Step 3: capture filenames from the ordinary single-file picker. No multi-select is enabled.
+    document.addEventListener('change', event => {
+        const input = event.target;
+        if (input instanceof HTMLInputElement && input.type === 'file') {
+            rememberFiles(input.files);
+        }
+    }, true);
+
+
+
 
 })();
